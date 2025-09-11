@@ -1,5 +1,4 @@
-tab_import = st.tabs(["📂 Import KPI Data"])[0]
-
+tab_imptab_import, tab_dashboard = st.tabs(["📂 Import KPI Data", "📊 Dashboard"])
 with tab_import:
     st.subheader("Import file kế hoạch & kết quả KPI")
 
