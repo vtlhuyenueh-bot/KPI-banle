@@ -1,84 +1,106 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import unicodedata
 
-st.set_page_config(page_title="KPI Tracker", layout="wide")
+st.set_page_config(page_title="KPI Tracker (auto-header)", layout="wide")
+st.title("📈 KPI Tracker — tự động nhận header & map cột")
 
-st.title("📈 Bảng theo dõi KPI nhóm")
+# ---------- helpers ----------
+def normalize_text(s):
+    if pd.isna(s):
+        return ""
+    s = str(s).strip()
+    # remove unicode accents
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = s.replace("-", " ").replace("_", " ").lower()
+    s = " ".join(s.split())
+    return s
 
-# Tạo 2 tab
-tab_import, tab_dashboard = st.tabs(["📂 Import KPI Data", "📊 Dashboard"])
+# tokens to detect each logical column
+TOKENS = {
+    "chitieu": ["chi tieu", "chitieu", "chi tieu", "chi-tieu", "kpi", "ten chi tieu", "ten"],
+    "kehoach": ["ke hoach", "kehoach", "kế hoạch", "ke-hoach", "target", "plan"],
+    "thuchien": ["thuc hien", "thuchien", "thực hiện", "thuc-hien", "actual", "achieved", "result"]
+}
 
-# Tab 1: Import KPI
-with tab_import:
-    st.header("📂 Import file KPI")
-    uploaded_file = st.file_uploader("Upload file KPI (Excel)", type=["xlsx", "xls"])
-
-    if uploaded_file is not None:
-        try:
-            # Đọc thử file Excel mà không chỉ định header
-            df_raw = pd.read_excel(uploaded_file, None)
-
-            # Lấy sheet đầu tiên
-            first_sheet = list(df_raw.keys())[0]
-            df = df_raw[first_sheet]
-
-            # Tìm dòng nào chứa "Chỉ tiêu"
-            header_row = None
-            for i, row in df.iterrows():
-                if "Chỉ tiêu" in row.values:
-                    header_row = i
+def find_best_header_row(df_sheet, max_rows=20):
+    # scan first max_rows rows to find a row containing many token matches
+    scores = []
+    for i in range(min(max_rows, len(df_sheet))):
+        row = df_sheet.iloc[i].astype(str).fillna("").tolist()
+        norm_row = [normalize_text(c) for c in row]
+        score = 0
+        for token_list in TOKENS.values():
+            for tok in token_list:
+                if any(tok in cell for cell in norm_row):
+                    score += 1
                     break
+        scores.append((i, score))
+    # choose row with highest score (require at least 1 match)
+    best = max(scores, key=lambda x: x[1])
+    return best[0] if best[1] > 0 else None
 
+def auto_map_columns(cols):
+    # cols: list of actual column names
+    norm_cols = [normalize_text(c) for c in cols]
+    mapping = {}
+    for logical, token_list in TOKENS.items():
+        found = None
+        for i, nc in enumerate(norm_cols):
+            for tok in token_list:
+                if tok in nc:
+                    found = cols[i]
+                    break
+            if found:
+                break
+        mapping[logical] = found
+    return mapping
+
+# ---------- UI ----------
+tab1, tab2 = st.tabs(["📂 Import KPI Data", "📊 Dashboard"])
+
+with tab1:
+    st.header("Tải file KPI (Excel)")
+    uploaded_file = st.file_uploader("Upload file KPI (.xlsx) — không cần chỉnh header", type=["xlsx"])
+
+    if uploaded_file:
+        try:
+            # read all sheets without header to inspect raw rows
+            sheets = pd.read_excel(uploaded_file, sheet_name=None, header=None)
+            first_sheet = list(sheets.keys())[0]
+            raw = sheets[first_sheet]
+
+            # try to find header row
+            header_row = find_best_header_row(raw, max_rows=30)
             if header_row is not None:
-                # Đọc lại file với header đúng
                 df = pd.read_excel(uploaded_file, sheet_name=first_sheet, header=header_row)
-                st.success("✅ File đã được tải lên thành công!")
-                st.dataframe(df)
-                st.session_state["kpi_data"] = df
+                st.success(f"Đã tự động phát hiện header ở hàng {header_row+1}")
             else:
-                st.error("❌ Không tìm thấy dòng tiêu đề chứa 'Chỉ tiêu'. Vui lòng kiểm tra lại file.")
-        except Exception as e:
-            st.error(f"Lỗi khi đọc file: {e}")
-    else:
-        st.info("👉 Vui lòng upload file KPI (.xlsx hoặc .xls)")
+                # fallback: read with default header=0
+                df = pd.read_excel(uploaded_file, sheet_name=first_sheet, header=0)
+                st.warning("Không xác định được header tự động — dùng hàng đầu tiên làm header (bạn có thể map cột tay).")
 
-# Tab 2: Dashboard KPI
-with tab_dashboard:
-    st.header("📊 Dashboard KPI")
+            # show sample and columns
+            st.subheader("Preview (5 dòng đầu)")
+            st.dataframe(df.head())
 
-    if "kpi_data" in st.session_state:
-        df = st.session_state["kpi_data"]
+            st.subheader("Tên cột hiện có (raw)")
+            col_list = df.columns.tolist()
+            col_display = {c: normalize_text(c) for c in col_list}
+            st.write(col_display)
 
-        # Kiểm tra các cột cần thiết
-        required_cols = ["Chỉ tiêu", "Kế hoạch", "Thực hiện"]
-        if all(col in df.columns for col in required_cols):
+            # try auto-mapping
+            auto_map = auto_map_columns(col_list)
+            st.subheader("Auto-mapping (gợi ý)")
+            st.write(auto_map)
 
-            # Bộ lọc theo nhóm (nếu có cột 'Phân nhóm chỉ tiêu')
-            if "Phân nhóm chỉ tiêu" in df.columns:
-                nhom_options = df["Phân nhóm chỉ tiêu"].dropna().unique().tolist()
-                nhom_selected = st.multiselect("🔎 Chọn nhóm chỉ tiêu", options=nhom_options, default=nhom_options)
+            # if any missing mapping, allow manual select from columns
+            need = []
+            for key in ["chitieu", "kehoach", "thuchien"]:
+                if not auto_map.get(key):
+                    need.append(key)
 
-                if nhom_selected:
-                    df = df[df["Phân nhóm chỉ tiêu"].isin(nhom_selected)]
-
-            # Hiển thị thống kê
-            st.subheader("📌 Dữ liệu đã lọc")
-            st.dataframe(df)
-
-            # Biểu đồ
-            st.subheader("📊 So sánh KPI")
-            fig = px.bar(
-                df,
-                x="Chỉ tiêu",
-                y=["Kế hoạch", "Thực hiện"],
-                barmode="group",
-                color_discrete_sequence=["#1f77b4", "#ff7f0e"],
-                title="So sánh Kế hoạch và Thực hiện theo Chỉ tiêu"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        else:
-            st.warning(f"⚠️ File chưa có đủ cột {required_cols} để vẽ biểu đồ.")
-    else:
-        st.info("👉 Vui lòng import dữ liệu trước ở tab **Import KPI Data**.")
+            # UI to confirm/adju
