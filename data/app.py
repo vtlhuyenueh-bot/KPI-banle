@@ -46,6 +46,6 @@ with tab_dashboard:
             df.set_index("Kế hoạch")[["Thực hiện"]].plot(kind="bar", ax=ax)
             st.pyplot(fig)
         else:
-            st.warning("⚠️ File chưa có đủ cột 'Chỉ tiêu' và 'Thực hiện' để vẽ biểu đồ.")
+            st.warning("⚠️ File chưa có đủ cột 'Kế hoạch' và 'Thực hiện' để vẽ biểu đồ.")
     else:
         st.info("👉 Vui lòng import dữ liệu trước ở tab **Import KPI Data**.")
