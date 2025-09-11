@@ -1,13 +1,13 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import unicodedata
+import traceback
 
-st.set_page_config(page_title="KPI Tracker", layout="wide")
-st.title("📈 KPI Tracker — Auto Detect Header & Mapping")
+st.set_page_config(page_title="KPI Tracker (auto-header)", layout="wide")
+st.title("📈 KPI Tracker — tự động nhận header & map cột")
 
-# ---------- Helpers ----------
+# ---------- helpers ----------
 def normalize_text(s):
     if pd.isna(s):
         return ""
@@ -19,11 +19,11 @@ def normalize_text(s):
     s = " ".join(s.split())
     return s
 
-# tokens để detect cột
+# tokens to detect each logical column
 TOKENS = {
-    "chitieu": ["chi tieu", "chitieu", "kpi", "ten chi tieu", "ten"],
-    "kehoach": ["ke hoach", "kehoach", "kế hoạch", "target", "plan"],
-    "thuchien": ["thuc hien", "thuchien", "thực hiện", "actual", "achieved", "result"]
+    "chitieu": ["chi tieu", "chitieu", "ten chi tieu", "ten", "kpi"],
+    "kehoach": ["ke hoach", "kehoach", "ke-hoach", "target", "plan"],
+    "thuchien": ["thuc hien", "thuchien", "thuc-hien", "actual", "achieved", "result"]
 }
 
 def find_best_header_row(df_sheet, max_rows=20):
@@ -56,16 +56,21 @@ def auto_map_columns(cols):
         mapping[logical] = found
     return mapping
 
-# ---------- UI ----------
-tab1, tab2 = st.tabs(["📂 Import KPI Data", "📊 Dashboard"])
+def validate_columns(df):
+    required = ["Chỉ tiêu", "Kế hoạch", "Thực hiện"]
+    missing = [c for c in required if c not in df.columns]
+    return missing
 
-with tab1:
-    st.header("📂 Upload file KPI (Excel)")
+# ---------- UI ----------
+tabs = st.tabs(["📂 Import KPI Data", "📊 Dashboard"])
+
+with tabs[0]:
+    st.header("Tải file KPI (Excel)")
     uploaded_file = st.file_uploader("Upload file KPI (.xlsx)", type=["xlsx"])
 
     if uploaded_file:
         try:
-            # Đọc tất cả sheet không header để tìm dòng header
+            # đọc tất cả sheet không header
             sheets = pd.read_excel(uploaded_file, sheet_name=None, header=None)
             first_sheet = list(sheets.keys())[0]
             raw = sheets[first_sheet]
@@ -74,76 +79,83 @@ with tab1:
             header_row = find_best_header_row(raw, max_rows=30)
             if header_row is not None:
                 df = pd.read_excel(uploaded_file, sheet_name=first_sheet, header=header_row)
-                st.success(f"✅ Đã phát hiện header ở dòng {header_row+1}")
+                st.success(f"✅ Đã tự động phát hiện header ở hàng {header_row+1}")
             else:
                 df = pd.read_excel(uploaded_file, sheet_name=first_sheet, header=0)
-                st.warning("⚠️ Không phát hiện header tự động — dùng dòng đầu tiên.")
+                st.warning("⚠️ Không tìm thấy header phù hợp — dùng hàng đầu tiên làm header.")
 
-            st.subheader("👀 Preview dữ liệu (5 dòng đầu)")
+            st.subheader("📑 Preview (5 dòng đầu)")
             st.dataframe(df.head())
 
-            # hiển thị cột và auto-map
+            st.subheader("Tên cột hiện có (raw)")
             col_list = df.columns.tolist()
-            auto_map = auto_map_columns(col_list)
+            st.write(col_list)
 
-            st.subheader("🔎 Auto-mapping")
+            # auto map
+            auto_map = auto_map_columns(col_list)
+            st.subheader("Auto-mapping (gợi ý)")
             st.write(auto_map)
 
-            # Cho phép chỉnh tay nếu auto-map bị thiếu
-            st.subheader("⚙️ Xác nhận cột")
-            col_chitieu = st.selectbox("Chỉ tiêu", options=col_list, index=col_list.index(auto_map["chitieu"]) if auto_map["chitieu"] else 0)
-            col_kehoach = st.selectbox("Kế hoạch", options=col_list, index=col_list.index(auto_map["kehoach"]) if auto_map["kehoach"] else 0)
-            col_thuchien = st.selectbox("Thực hiện", options=col_list, index=col_list.index(auto_map["thuchien"]) if auto_map["thuchien"] else 0)
+            # manual adjust
+            st.subheader("Chọn lại cột (nếu cần)")
+            col_chitieu = st.selectbox("Cột chỉ tiêu", col_list, index=col_list.index(auto_map["chitieu"]) if auto_map["chitieu"] else 0)
+            col_kehoach = st.selectbox("Cột kế hoạch", col_list, index=col_list.index(auto_map["kehoach"]) if auto_map["kehoach"] else 0)
+            col_thuchien = st.selectbox("Cột thực hiện", col_list, index=col_list.index(auto_map["thuchien"]) if auto_map["thuchien"] else 0)
 
-            if st.button("Lưu dữ liệu"):
-                df_mapped = df.rename(columns={
-                    col_chitieu: "Chỉ tiêu",
-                    col_kehoach: "Kế hoạch",
-                    col_thuchien: "Thực hiện"
-                })
-                st.session_state["kpi_data"] = df_mapped
-                st.success("📥 Dữ liệu đã được lưu, sang tab Dashboard để xem báo cáo.")
+            df = df.rename(columns={col_chitieu: "Chỉ tiêu", col_kehoach: "Kế hoạch", col_thuchien: "Thực hiện"})
+            st.session_state["kpi_data"] = df
+            st.success("🎉 Dữ liệu đã sẵn sàng, chuyển sang tab Dashboard để xem biểu đồ.")
 
         except Exception as e:
-            st.error(f"❌ Lỗi khi đọc file: {e}")
+            st.error("❌ Lỗi khi đọc file.")
+            st.code(traceback.format_exc())
 
-with tab2:
+with tabs[1]:
     st.header("📊 Dashboard KPI")
 
-    if "kpi_data" in st.session_state:
-        df = st.session_state["kpi_data"]
-
-        st.subheader("📋 Dữ liệu chuẩn hóa")
-        st.dataframe(df.head())
-
-        st.subheader("📌 Tổng quan")
-        st.write(f"- Số dòng dữ liệu: {df.shape[0]}")
-        st.write(f"- Số cột dữ liệu: {df.shape[1]}")
-
-        # Biểu đồ
-        if all(col in df.columns for col in ["Chỉ tiêu", "Kế hoạch", "Thực hiện"]):
-            st.subheader("📈 Biểu đồ so sánh KPI")
-
-            fig = px.bar(
-                df,
-                x="Chỉ tiêu",
-                y=["Kế hoạch", "Thực hiện"],
-                barmode="group",
-                text_auto=True,
-                title="So sánh Kế hoạch vs Thực hiện"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # % Hoàn thành
-            st.subheader("✅ Tỉ lệ hoàn thành")
-            df["% Hoàn thành"] = (df["Thực hiện"] / df["Kế hoạch"] * 100).round(2)
-            st.dataframe(df[["Chỉ tiêu", "Kế hoạch", "Thực hiện", "% Hoàn thành"]])
-
-            # Cho phép download file kết quả
-            csv = df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ Tải file kết quả (.csv)", data=csv, file_name="kpi_result.csv", mime="text/csv")
-
-        else:
-            st.warning("⚠️ File chưa có đủ cột 'Chỉ tiêu', 'Kế hoạch', 'Thực hiện'.")
+    if "kpi_data" not in st.session_state:
+        st.info("👆 Hãy import file Excel ở tab **Import KPI Data** trước.")
     else:
-        st.info("👉 Vui lòng import dữ liệu trước ở tab **📂 Import KPI Data**.")
+        try:
+            df = st.session_state["kpi_data"]
+
+            missing = validate_columns(df)
+            if missing:
+                st.warning(f"⚠️ File thiếu cột: {', '.join(missing)}. Không thể vẽ biểu đồ.")
+            else:
+                # convert về số
+                for col in ["Kế hoạch", "Thực hiện"]:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                df = df.dropna(subset=["Kế hoạch", "Thực hiện"])
+
+                if df.empty:
+                    st.error("❌ Không có dữ liệu hợp lệ sau khi làm sạch.")
+                else:
+                    # bar chart
+                    fig = px.bar(
+                        df,
+                        x="Chỉ tiêu",
+                        y=["Kế hoạch", "Thực hiện"],
+                        barmode="group",
+                        text_auto=True,
+                        title="So sánh Kế hoạch vs Thực hiện"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # % completion
+                    df["% Hoàn thành"] = (df["Thực hiện"] / df["Kế hoạch"] * 100).round(1)
+                    fig2 = px.line(
+                        df,
+                        x="Chỉ tiêu",
+                        y="% Hoàn thành",
+                        markers=True,
+                        title="% Hoàn thành KPI"
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
+
+                    st.subheader("📑 Bảng dữ liệu chi tiết")
+                    st.dataframe(df, use_container_width=True)
+
+        except Exception as e:
+            st.error("❌ Có lỗi xảy ra trong quá trình xử lý dữ liệu.")
+            st.code(traceback.format_exc())
