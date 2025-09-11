@@ -1,153 +1,51 @@
-import streamlit as st
-import pandas as pd
-import json
-import os
-import bcrypt
-import plotly.express as px
-from datetime import datetime
+tab_import = st.tabs(["📂 Import KPI Data"])[0]
 
-DATA_FILE = "data/kpi_data.json"
+with tab_import:
+    st.subheader("Import file kế hoạch & kết quả KPI")
 
-# ------------------ Helper functions ------------------
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        return {"users": {}, "kpis": []}
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+    plan_file = st.file_uploader("Upload file kế hoạch (Plan)", type=["xlsx", "csv"], key="plan")
+    actual_file = st.file_uploader("Upload file kết quả (Actual)", type=["xlsx", "csv"], key="actual")
 
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-def hash_password(password):
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
-def check_password(password, hashed):
-    return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
-
-# ------------------ Auth ------------------
-def register(username, password, role="staff"):
-    data = load_data()
-    if username in data["users"]:
-        return False, "❌ Username đã tồn tại"
-    data["users"][username] = {"password": hash_password(password), "role": role}
-    save_data(data)
-    return True, "✅ Đăng ký thành công!"
-
-def login(username, password):
-    data = load_data()
-    if username not in data["users"]:
-        return False, "❌ Sai username"
-    user = data["users"][username]
-    if not check_password(password, user["password"]):
-        return False, "❌ Sai password"
-    return True, user["role"]
-
-# ------------------ KPI ------------------
-def add_kpi(user, kpi_name, target, actual, month):
-    data = load_data()
-    data["kpis"].append({
-        "user": user,
-        "month": month,
-        "kpi_name": kpi_name,
-        "target": target,
-        "actual": actual
-    })
-    save_data(data)
-
-def get_user_kpis(user):
-    data = load_data()
-    return [k for k in data["kpis"] if k["user"] == user]
-
-def get_all_kpis():
-    data = load_data()
-    return data["kpis"]
-
-# ------------------ Streamlit UI ------------------
-st.set_page_config(page_title="KPI Tracker", layout="wide")
-st.title("📊 KPI Tracker App")
-
-# Session
-if "auth" not in st.session_state:
-    st.session_state.auth = None
-if "role" not in st.session_state:
-    st.session_state.role = None
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-# Tabs
-tab_login, tab_input, tab_personal, tab_dashboard = st.tabs(
-    ["🔑 Đăng nhập/Đăng ký", "📝 Nhập KPI", "🙋 KPI Cá nhân", "📈 Dashboard Nhóm"]
-)
-
-# ---- Tab Login ----
-with tab_login:
-    st.subheader("Đăng nhập")
-    lg_user = st.text_input("Username", key="lg_user")
-    lg_pass = st.text_input("Password", type="password", key="lg_pass")
-    if st.button("Đăng nhập"):
-        ok, msg = login(lg_user, lg_pass)
-        if ok:
-            st.success("Đăng nhập thành công")
-            st.session_state.auth = True
-            st.session_state.user = lg_user
-            st.session_state.role = msg
+    if plan_file and actual_file:
+        # Đọc file kế hoạch
+        if plan_file.name.endswith("csv"):
+            df_plan = pd.read_csv(plan_file)
         else:
-            st.error(msg)
+            df_plan = pd.read_excel(plan_file)
 
-    st.subheader("Đăng ký")
-    rg_user = st.text_input("New Username", key="rg_user")
-    rg_pass = st.text_input("New Password", type="password", key="rg_pass")
-    rg_role = st.selectbox("Role", ["staff", "manager"])
-    if st.button("Đăng ký"):
-        ok, msg = register(rg_user, rg_pass, rg_role)
-        if ok:
-            st.success(msg)
+        # Đọc file kết quả
+        if actual_file.name.endswith("csv"):
+            df_actual = pd.read_csv(actual_file)
         else:
-            st.error(msg)
+            df_actual = pd.read_excel(actual_file)
 
-# ---- Tab Input ----
-with tab_input:
-    if not st.session_state.auth:
-        st.warning("⚠️ Vui lòng đăng nhập trước")
-    else:
-        st.subheader("Nhập KPI cá nhân")
-        kpi_name = st.text_input("Tên KPI")
-        target = st.number_input("Chỉ tiêu (Target)", min_value=0.0)
-        actual = st.number_input("Thực hiện (Actual)", min_value=0.0)
-        month = st.text_input("Tháng (YYYY-MM)", value=datetime.today().strftime("%Y-%m"))
-        if st.button("Lưu KPI"):
-            add_kpi(st.session_state.user, kpi_name, target, actual, month)
-            st.success("✅ KPI đã được lưu!")
+        # Kiểm tra cột
+        required_plan = {"User", "Month", "KPI Name", "Target"}
+        required_actual = {"User", "Month", "KPI Name", "Actual"}
 
-# ---- Tab Personal ----
-with tab_personal:
-    if not st.session_state.auth:
-        st.warning("⚠️ Vui lòng đăng nhập trước")
-    else:
-        st.subheader(f"KPI của {st.session_state.user}")
-        user_kpis = get_user_kpis(st.session_state.user)
-        if user_kpis:
-            df = pd.DataFrame(user_kpis)
+        if not required_plan.issubset(df_plan.columns):
+            st.error(f"❌ File kế hoạch phải có các cột: {required_plan}")
+        elif not required_actual.issubset(df_actual.columns):
+            st.error(f"❌ File kết quả phải có các cột: {required_actual}")
+        else:
+            # Merge dữ liệu
+            df = pd.merge(df_plan, df_actual, on=["User", "Month", "KPI Name"], how="left")
+
+            # Tính KPI %
+            df["KPI Score (%)"] = (df["Actual"] / df["Target"] * 100).round(2)
+            df["KPI Score (%)"] = df["KPI Score (%)"].apply(lambda x: min(x, 120) if pd.notnull(x) else 0)
+
+            # Hiển thị
+            st.subheader("📊 Kết quả KPI")
             st.dataframe(df)
-            fig = px.bar(df, x="kpi_name", y=["target", "actual"], barmode="group", color_discrete_map={"target": "red", "actual": "green"})
-            st.plotly_chart(fig)
-        else:
-            st.info("Chưa có KPI nào")
 
-# ---- Tab Dashboard ----
-with tab_dashboard:
-    if not st.session_state.auth:
-        st.warning("⚠️ Vui lòng đăng nhập trước")
-    elif st.session_state.role != "manager":
-        st.error("❌ Chỉ Manager mới xem được dashboard nhóm")
-    else:
-        st.subheader("Dashboard KPI Nhóm")
-        all_kpis = get_all_kpis()
-        if all_kpis:
-            df = pd.DataFrame(all_kpis)
-            st.dataframe(df)
-            fig = px.bar(df, x="user", y="actual", color="kpi_name", barmode="group")
+            # Biểu đồ theo nhân viên
+            fig = px.bar(df, x="KPI Name", y="KPI Score (%)", color="User", barmode="group", facet_col="Month")
             st.plotly_chart(fig)
-        else:
-            st.info("Chưa có dữ liệu KPI")
+
+            # Trung bình theo User
+            avg_df = df.groupby("User")["KPI Score (%)"].mean().reset_index()
+            st.subheader("📌 Điểm KPI trung bình theo nhân viên")
+            st.dataframe(avg_df)
+            fig2 = px.bar(avg_df, x="User", y="KPI Score (%)", color="User")
+            st.plotly_chart(fig2)
