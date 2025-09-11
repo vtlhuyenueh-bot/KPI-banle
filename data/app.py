@@ -1,92 +1,65 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
+import matplotlib.pyplot as plt
 
-# =========================
-# CẤU HÌNH CHUNG
-# =========================
 st.set_page_config(page_title="KPI Tracker", layout="wide")
 
-st.title("📊 Bảng theo dõi KPI nhóm")
+st.title("📈 Bảng theo dõi KPI nhóm")
 
-# =========================
-# TẠO 2 TAB
-# =========================
-tab1, tab2 = st.tabs(["📂 Import KPI Data", "📈 Dashboard"])
+# Tạo 2 tab
+tab_import, tab_dashboard = st.tabs(["📂 Import KPI Data", "📊 Dashboard"])
 
-# =========================
-# TAB 1: IMPORT DỮ LIỆU
-# =========================
-with tab1:
-    st.header("Tải file KPI")
+# Tab 1: Import KPI
+with tab_import:
+    st.header("📂 Import file KPI")
+    uploaded_file = st.file_uploader("Upload file KPI (Excel)", type=["xlsx", "xls"])
 
-    uploaded_file = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"])
-
-    if uploaded_file:
+    if uploaded_file is not None:
         try:
             df = pd.read_excel(uploaded_file)
-            st.success("✅ File đã tải thành công")
-            st.dataframe(df.head())
 
-            # Gợi ý map tên cột
-            columns = df.columns.tolist()
+            # Reset lại session_state để tránh DuplicateError
+            st.session_state["kpi_data"] = df.copy()
 
-            col_chitieu = st.selectbox("Chọn cột Chỉ tiêu", columns)
-            col_kehoach = st.selectbox("Chọn cột Kế hoạch", columns)
-            col_thuchien = st.selectbox("Chọn cột Thực hiện", columns)
-
-            # Lưu vào session_state
-            st.session_state["data"] = {
-                "df": df,
-                "cols": {
-                    "Chỉ tiêu": col_chitieu,
-                    "Kế hoạch": col_kehoach,
-                    "Thực hiện": col_thuchien
-                }
-            }
+            st.success("✅ File đã được tải lên thành công!")
+            st.dataframe(df)
 
         except Exception as e:
             st.error(f"Lỗi khi đọc file: {e}")
-
-# =========================
-# TAB 2: DASHBOARD KPI
-# =========================
-with tab2:
-    st.header("Dashboard KPI")
-
-    if "data" in st.session_state:
-        df = st.session_state["data"]["df"]
-        cols = st.session_state["data"]["cols"]
-
-        # Chuẩn hóa lại tên cột
-        df_chart = df[[cols["Chỉ tiêu"], cols["Kế hoạch"], cols["Thực hiện"]]]
-        df_chart = df_chart.rename(columns={
-            cols["Chỉ tiêu"]: "Chỉ tiêu",
-            cols["Kế hoạch"]: "Kế hoạch",
-            cols["Thực hiện"]: "Thực hiện"
-        })
-
-        # Hiển thị thống kê
-        st.subheader("📌 Tổng quan dữ liệu")
-        st.write(f"Số dòng dữ liệu: {df_chart.shape[0]}")
-        st.write(f"Số cột dữ liệu: {df_chart.shape[1]}")
-
-        # Vẽ biểu đồ
-        st.subheader("📊 So sánh Kế hoạch vs Thực hiện")
-        fig = px.bar(
-            df_chart,
-            x="Chỉ tiêu",
-            y=["Kế hoạch", "Thực hiện"],
-            barmode="group",
-            text_auto=True,
-            color_discrete_sequence=["#636EFA", "#EF553B"]
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Tính % hoàn thành
-        df_chart["% Hoàn thành"] = (df_chart["Thực hiện"] / df_chart["Kế hoạch"] * 100).round(2)
-        st.subheader("📈 Tỷ lệ hoàn thành (%)")
-        st.dataframe(df_chart)
-
     else:
-        st.warning("⚠️ Vui lòng import file ở tab 'Import KPI Data' trước.")
+        st.info("👉 Vui lòng upload file KPI (.xlsx hoặc .xls)")
+
+# Tab 2: Dashboard KPI
+with tab_dashboard:
+    st.header("📊 Dashboard KPI")
+
+    if "kpi_data" in st.session_state:
+        df = st.session_state["kpi_data"]
+
+        # Hiển thị thống kê cơ bản
+        st.subheader("📌 Tổng quan dữ liệu")
+        st.write(f"Số dòng dữ liệu: {df.shape[0]}")
+        st.write(f"Số cột dữ liệu: {df.shape[1]}")
+
+        # Kiểm tra đủ cột để vẽ biểu đồ
+        if all(col in df.columns for col in ["Chỉ tiêu", "Kế hoạch", "Thực hiện"]):
+            df_chart = df[["Chỉ tiêu", "Kế hoạch", "Thực hiện"]]
+
+            st.subheader("📊 So sánh Kế hoạch vs Thực hiện")
+
+            fig, ax = plt.subplots(figsize=(10, 5))
+            width = 0.35
+            x = range(len(df_chart))
+
+            ax.bar([p - width/2 for p in x], df_chart["Kế hoạch"], width=width, label="Kế hoạch")
+            ax.bar([p + width/2 for p in x], df_chart["Thực hiện"], width=width, label="Thực hiện")
+
+            ax.set_xticks(x)
+            ax.set_xticklabels(df_chart["Chỉ tiêu"], rotation=45, ha="right")
+            ax.legend()
+
+            st.pyplot(fig)
+        else:
+            st.warning("⚠️ File chưa có đủ cột 'Chỉ tiêu', 'Kế hoạch' và 'Thực hiện' để vẽ biểu đồ.")
+    else:
+        st.info("👉 Vui lòng import dữ liệu trước ở tab **Import KPI Data**.")
