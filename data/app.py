@@ -1,50 +1,51 @@
-tab_imptab_import, tab_dashboard = st.tabs(["📂 Import KPI Data", "📊 Dashboard"])
+import streamlit as st
+import pandas as pd
+
+st.set_page_config(page_title="KPI Tracker", layout="wide")
+
+st.title("📈 Bảng theo dõi KPI nhóm")
+
+# Tạo 2 tab
+tab_import, tab_dashboard = st.tabs(["📂 Import KPI Data", "📊 Dashboard"])
+
+# Tab 1: Import KPI
 with tab_import:
-    st.subheader("Import file kế hoạch & kết quả KPI")
+    st.header("📂 Import file KPI")
+    uploaded_file = st.file_uploader("Upload file KPI (Excel)", type=["xlsx", "xls"])
 
-    plan_file = st.file_uploader("Upload file kế hoạch (Plan)", type=["xlsx", "csv"], key="plan")
-    actual_file = st.file_uploader("Upload file kết quả (Actual)", type=["xlsx", "csv"], key="actual")
+    if uploaded_file is not None:
+        try:
+            df = pd.read_excel(uploaded_file)
+            st.success("✅ File đã được tải lên thành công!")
+            st.dataframe(df)  # Hiển thị trước dữ liệu
+            st.session_state["kpi_data"] = df  # Lưu vào session_state để Dashboard dùng
+        except Exception as e:
+            st.error(f"Lỗi khi đọc file: {e}")
+    else:
+        st.info("👉 Vui lòng upload file KPI (.xlsx hoặc .xls)")
 
-    if plan_file and actual_file:
-        # Đọc file kế hoạch
-        if plan_file.name.endswith("csv"):
-            df_plan = pd.read_csv(plan_file)
+# Tab 2: Dashboard KPI
+with tab_dashboard:
+    st.header("📊 Dashboard KPI")
+
+    if "kpi_data" in st.session_state:
+        df = st.session_state["kpi_data"]
+
+        # Hiển thị thống kê cơ bản
+        st.subheader("📌 Tổng quan dữ liệu")
+        st.write(f"Số dòng dữ liệu: {df.shape[0]}")
+        st.write(f"Số cột dữ liệu: {df.shape[1]}")
+
+        # Nếu có cột "Chỉ tiêu" và "Thực hiện", vẽ biểu đồ
+        if "Chỉ tiêu" in df.columns and "Thực hiện" in df.columns:
+            import matplotlib.pyplot as plt
+
+            st.subheader("📊 So sánh KPI")
+
+            fig, ax = plt.subplots()
+            df.set_index("Chỉ tiêu")[["Thực hiện"]].plot(kind="bar", ax=ax)
+            st.pyplot(fig)
         else:
-            df_plan = pd.read_excel(plan_file)
-
-        # Đọc file kết quả
-        if actual_file.name.endswith("csv"):
-            df_actual = pd.read_csv(actual_file)
-        else:
-            df_actual = pd.read_excel(actual_file)
-
-        # Kiểm tra cột
-        required_plan = {"User", "Month", "KPI Name", "Target"}
-        required_actual = {"User", "Month", "KPI Name", "Actual"}
-
-        if not required_plan.issubset(df_plan.columns):
-            st.error(f"❌ File kế hoạch phải có các cột: {required_plan}")
-        elif not required_actual.issubset(df_actual.columns):
-            st.error(f"❌ File kết quả phải có các cột: {required_actual}")
-        else:
-            # Merge dữ liệu
-            df = pd.merge(df_plan, df_actual, on=["User", "Month", "KPI Name"], how="left")
-
-            # Tính KPI %
-            df["KPI Score (%)"] = (df["Actual"] / df["Target"] * 100).round(2)
-            df["KPI Score (%)"] = df["KPI Score (%)"].apply(lambda x: min(x, 120) if pd.notnull(x) else 0)
-
-            # Hiển thị
-            st.subheader("📊 Kết quả KPI")
-            st.dataframe(df)
-
-            # Biểu đồ theo nhân viên
-            fig = px.bar(df, x="KPI Name", y="KPI Score (%)", color="User", barmode="group", facet_col="Month")
-            st.plotly_chart(fig)
-
-            # Trung bình theo User
-            avg_df = df.groupby("User")["KPI Score (%)"].mean().reset_index()
-            st.subheader("📌 Điểm KPI trung bình theo nhân viên")
-            st.dataframe(avg_df)
-            fig2 = px.bar(avg_df, x="User", y="KPI Score (%)", color="User")
-            st.plotly_chart(fig2)
+            st.warning("⚠️ File chưa có đủ cột 'Chỉ tiêu' và 'Thực hiện' để vẽ biểu đồ.")
+    else:
+        st.info("👉 Vui lòng import dữ liệu trước ở tab **Import KPI Data**.")
