@@ -36,14 +36,14 @@ with tab_dashboard:
         st.write(f"Số dòng dữ liệu: {df.shape[0]}")
         st.write(f"Số cột dữ liệu: {df.shape[1]}")
 
-        # Nếu có cột "Chỉ tiêu" và "Thực hiện", vẽ biểu đồ
-        if "Chỉ tiêu" in df.columns and "Thực hiện" in df.columns:
+        # Nếu có cột "Kế hoạch" và "Thực hiện", vẽ biểu đồ
+        if "Kế hoạch" in df.columns and "Thực hiện" in df.columns:
             import matplotlib.pyplot as plt
 
             st.subheader("📊 So sánh KPI")
 
             fig, ax = plt.subplots()
-            df.set_index("Chỉ tiêu")[["Thực hiện"]].plot(kind="bar", ax=ax)
+            df.set_index("Kế hoạch")[["Thực hiện"]].plot(kind="bar", ax=ax)
             st.pyplot(fig)
         else:
             st.warning("⚠️ File chưa có đủ cột 'Chỉ tiêu' và 'Thực hiện' để vẽ biểu đồ.")
