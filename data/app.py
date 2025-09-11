@@ -127,7 +127,7 @@ with tab2:
             fig = px.bar(
                 df,
                 x="Chỉ tiêu",
-                y=["Kế hoạch", "Thực hiện"]
+                y=["Kế hoạch", "Thực hiện"],
                 barmode="group",
                 text_auto=True,
                 title="So sánh Kế hoạch vs Thực hiện"
