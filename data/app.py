@@ -1,112 +1,78 @@
-# app.py
 import streamlit as st
 import pandas as pd
-import numpy as np
 import plotly.express as px
-from io import BytesIO
 
-st.set_page_config(page_title="KPI Dashboard", layout="wide")
-st.title("📊 KPI Dashboard - Tổng hợp & Ranking")
+st.set_page_config(page_title="Dashboard Kinh doanh", layout="wide")
 
-def to_num(s):
-    return pd.to_numeric(s.astype(str)
-                         .str.replace(",", "", regex=False)
-                         .str.replace("%", "", regex=False),
-                         errors="coerce")
+st.title("📊 Dashboard Kinh doanh bán lẻ")
 
-def read_kpi_excel(f):
-    # đọc tất cả sheet -> dict of DataFrames
-    xl = pd.read_excel(f, sheet_name=None)
-    results = {}
-    for sheet, df in xl.items():
-        df = df.copy()
-        df.columns = [c.strip() for c in df.columns]
-        # Chuẩn hóa các cột bắt buộc
-        for col in ["Chỉ tiêu", "Trọng số", "Kế hoạch", "Thực hiện"]:
-            if col not in df.columns:
-                raise ValueError(f"Sheet '{sheet}' thiếu cột '{col}'")
-        # numeric convert
-        df["Trọng số"] = to_num(df["Trọng số"]).fillna(0)
-        df["Kế hoạch"] = to_num(df["Kế hoạch"]).fillna(0)
-        df["Thực hiện"] = to_num(df["Thực hiện"]).fillna(0)
-        # Nếu trọng số ở dạng % (tổng >1) thì chia 100
-        if df["Trọng số"].sum() > 1.1:
-            df["Trọng số"] = df["Trọng số"] / 100.0
-        # tính % hoàn thành & điểm
-        df["%HT"] = df.apply(lambda r: (r["Thực hiện"]/r["Kế hoạch"])
-                             if r["Kế hoạch"] and r["Kế hoạch"] != 0 else 0, axis=1)
-        df["%HT"] = df["%HT"].replace([np.inf, -np.inf], 0).fillna(0)
-        df["Điểm"] = df["%HT"] * df["Trọng số"]
-        results[sheet] = df
-    return results
+uploaded_file = st.file_uploader("Tải file Excel", type=["xlsx"])
 
-# Upload file hoặc dùng file trong repo (nếu bạn lưu File KPI trong repo)
-uploaded = st.file_uploader("Tải lên file KPI (.xlsx) (mỗi sheet = 1 nhân viên)", type=["xlsx"])
-use_repo_file = st.checkbox("Hoặc dùng file: 'data/File KPI.xlsx' trong repo (nếu đã push lên GitHub)", value=False)
-
-data_file = None
-if uploaded:
-    data_file = uploaded
-elif use_repo_file:
+if uploaded_file:
     try:
-        data_file = "data/File KPI.xlsx"
-        open(data_file, "rb").close()
-    except Exception:
-        st.error("Không tìm thấy file data/File KPI.xlsx trong repo. Hãy upload hoặc push file vào repo.")
-        st.stop()
+        # Đọc tất cả sheet
+        xls = pd.ExcelFile(uploaded_file)
+        sheets = xls.sheet_names
+        st.sidebar.success(f"Đã nhận file có {len(sheets)} sheet")
+
+        all_data = []
+
+        for sheet in sheets:
+            df = pd.read_excel(uploaded_file, sheet_name=sheet)
+
+            # Chuẩn hóa header
+            df.columns = df.columns.str.strip().str.lower()
+
+            # Các cột bắt buộc
+            required_cols = ["chỉ tiêu", "trọng số", "kế hoạch", "thực hiện"]
+
+            for col in required_cols:
+                if col not in df.columns:
+                    raise ValueError(
+                        f"❌ Sheet '{sheet}' thiếu cột '{col}'. "
+                        f"Header thực tế: {df.columns.tolist()}"
+                    )
+
+            # Thêm cột tên sheet để phân biệt phòng/nhân viên
+            df["nhân viên"] = sheet
+            all_data.append(df)
+
+        # Gộp toàn bộ dữ liệu
+        data = pd.concat(all_data, ignore_index=True)
+
+        # Tính % hoàn thành
+        data["% hoàn thành"] = data["thực hiện"] / data["kế hoạch"] * 100
+
+        # Hiển thị bảng
+        st.subheader("📌 Dữ liệu tổng hợp")
+        st.dataframe(data)
+
+        # Vẽ biểu đồ
+        st.subheader("📈 So sánh Kế hoạch vs Thực hiện")
+        fig = px.bar(
+            data,
+            x="chỉ tiêu",
+            y=["kế hoạch", "thực hiện"],
+            color="nhân viên",
+            barmode="group",
+            title="So sánh kế hoạch - thực hiện theo nhân viên",
+            text_auto=True
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Biểu đồ % hoàn thành
+        st.subheader("🔥 Tỷ lệ hoàn thành")
+        fig2 = px.bar(
+            data,
+            x="chỉ tiêu",
+            y="% hoàn thành",
+            color="nhân viên",
+            title="% Hoàn thành theo nhân viên",
+            text_auto=".1f"
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Lỗi xử lý file: {e}")
 else:
-    st.info("Upload file mẫu (File KPI.xlsx) để bắt đầu.")
-    st.stop()
-
-# process
-try:
-    kpi_dict = read_kpi_excel(data_file)
-except Exception as e:
-    st.error(f"Lỗi đọc file: {e}")
-    st.stop()
-
-# build summary
-rows = []
-for nv, df in kpi_dict.items():
-    total_score = df["Điểm"].sum()
-    total_plan = df["Kế hoạch"].sum()
-    total_actual = df["Thực hiện"].sum()
-    overall_pct = (total_actual/total_plan) if total_plan != 0 else 0
-    rows.append({
-        "Nhân viên": nv,
-        "Điểm KPI": round(total_score, 4),
-        "%HT chung": round(overall_pct*100, 2),
-        "Kế hoạch tổng": total_plan,
-        "Thực hiện tổng": total_actual
-    })
-summary = pd.DataFrame(rows).sort_values("Điểm KPI", ascending=False).reset_index(drop=True)
-
-# UI: Summary + ranking
-st.subheader("📋 Bảng tóm tắt KPI")
-st.dataframe(summary, use_container_width=True)
-
-st.subheader("🏆 Ranking theo Điểm KPI")
-fig = px.bar(summary, x="Nhân viên", y="Điểm KPI", text="Điểm KPI")
-st.plotly_chart(fig, use_container_width=True)
-
-# Drill-down nhân viên
-st.subheader("🔎 Xem chi tiết nhân viên")
-sel = st.selectbox("Chọn nhân viên", summary["Nhân viên"].tolist())
-if sel:
-    df_sel = kpi_dict[sel]
-    st.markdown(f"### Chi tiết: **{sel}**")
-    st.dataframe(df_sel, use_container_width=True)
-
-    fig2 = px.bar(df_sel, x="Chỉ tiêu", y=["Kế hoạch", "Thực hiện"], barmode="group", text_auto=True,
-                  title=f"So sánh Kế hoạch vs Thực hiện - {sel}")
-    st.plotly_chart(fig2, use_container_width=True)
-
-# Download summary
-def to_excel_bytes(df):
-    out = BytesIO()
-    with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="Summary")
-    return out.getvalue()
-
-st.download_button("⬇️ Tải về file tổng hợp (Excel)", data=to_excel_bytes(summary),
-                   file_name="KPI_summary.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.info("👆 Vui lòng tải file Excel để bắt đầu")
