@@ -19,30 +19,36 @@ if uploaded_file:
         for sheet in all_sheets:
             df = pd.read_excel(uploaded_file, sheet_name=sheet)
 
-            # Chuẩn hóa header (bỏ khoảng trắng, lower-case)
+            # Chuẩn hóa header
             df.columns = df.columns.str.strip().str.lower()
 
-            required_cols = ["chỉ tiêu", "trọng số", "kế hoạch", "thực hiện"]
+            # Mapping linh hoạt
             mapping = {
-                "chỉ tiêu": "Chỉ tiêu",
-                "trọng số": "Trọng số",
-                "kế hoạch": "Kế hoạch",
-                "thực hiện": "Thực hiện"
+                "chỉ tiêu": ["chỉ tiêu"],
+                "trọng số": ["trọng số", "trọng số (%)"],
+                "kế hoạch": ["kế hoạch"],
+                "thực hiện": ["thực hiện"]
             }
 
-            if not all(col in df.columns for col in [c.lower() for c in required_cols]):
+            col_map = {}
+            for std_col, variants in mapping.items():
+                for v in variants:
+                    if v in df.columns:
+                        col_map[v] = std_col
+                        break
+
+            if len(set(col_map.values())) < 4:
                 st.error(f"❌ Sheet '{sheet}' thiếu cột. Header thực tế: {list(df.columns)}")
                 st.stop()
 
-            # Đổi tên cột về chuẩn
-            df = df.rename(columns=mapping)
+            df = df.rename(columns={k: v for k, v in col_map.items()})
 
             # Tính toán
-            df["% Hoàn thành"] = df["Thực hiện"] / df["Kế hoạch"] * 100
-            df["Điểm"] = df["% Hoàn thành"] * df["Trọng số"] / 100
+            df["% Hoàn thành"] = df["thực hiện"] / df["kế hoạch"] * 100
+            df["Điểm"] = df["% Hoàn thành"] * df["trọng số"] / 100
 
-            # Format số liệu 2 chữ số thập phân
-            for col in ["Trọng số", "Kế hoạch", "Thực hiện", "% Hoàn thành", "Điểm"]:
+            # Làm đẹp số liệu
+            for col in ["trọng số", "kế hoạch", "thực hiện", "% Hoàn thành", "Điểm"]:
                 df[col] = df[col].astype(float).round(2)
 
             data_nhanvien[sheet] = df
@@ -55,9 +61,9 @@ if uploaded_file:
 
             st.subheader(f"📌 KPI chi tiết - {nhan_vien}")
             st.dataframe(df_nv.style.format({
-                "Trọng số": "{:.2f}",
-                "Kế hoạch": "{:.2f}",
-                "Thực hiện": "{:.2f}",
+                "trọng số": "{:.2f}",
+                "kế hoạch": "{:.2f}",
+                "thực hiện": "{:.2f}",
                 "% Hoàn thành": "{:.2f}",
                 "Điểm": "{:.2f}"
             }))
@@ -65,8 +71,8 @@ if uploaded_file:
             # Biểu đồ
             fig = px.bar(
                 df_nv,
-                x="Chỉ tiêu",
-                y=["Kế hoạch", "Thực hiện"],
+                x="chỉ tiêu",
+                y=["kế hoạch", "thực hiện"],
                 barmode="group",
                 title=f"So sánh Kế hoạch vs Thực hiện - {nhan_vien}"
             )
