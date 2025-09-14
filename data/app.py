@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -7,19 +6,17 @@ import unicodedata
 import re
 from io import BytesIO
 
-st.set_page_config(page_title="KPI Dashboard - Robust Header", layout="wide")
-st.title("📊 KPI Dashboard (Header normalization)")
+st.set_page_config(page_title="KPI Dashboard", layout="wide")
+st.title("📊 KPI Dashboard - Bán lẻ")
 
+# ====== HÀM HỖ TRỢ ======
 def strip_accents(s: str) -> str:
-    s = str(s)
-    nk = unicodedata.normalize("NFKD", s)
+    nk = unicodedata.normalize("NFKD", str(s))
     return "".join([c for c in nk if not unicodedata.combining(c)])
 
 def normalize_col(s: str) -> str:
     s = strip_accents(s).lower().strip()
-    # remove common punctuation and percent/parenthesis chars -> replace by space
     s = re.sub(r'[%\(\)\[\]\{\}\-_/\\,;:\"]', ' ', s)
-    # keep only alnum and spaces
     s = re.sub(r'[^0-9a-z\s]', ' ', s)
     s = re.sub(r'\s+', ' ', s).strip()
     return s
@@ -31,40 +28,29 @@ def to_num(series: pd.Series) -> pd.Series:
                          .str.strip(),
                          errors="coerce")
 
-show_debug = st.sidebar.checkbox("Hiện debug header mapping", value=False)
-
-uploaded_file = st.file_uploader("Tải file KPI (.xlsx) (mỗi sheet = 1 nhân viên)", type=["xlsx"])
+# ====== UPLOAD FILE ======
+uploaded_file = st.file_uploader("📂 Tải file Excel KPI (mỗi sheet = 1 cán bộ)", type=["xlsx"])
 if not uploaded_file:
-    st.info("Upload file Excel chứa các sheet nhân viên để bắt đầu.")
+    st.info("👆 Vui lòng upload file Excel để bắt đầu.")
     st.stop()
 
 try:
     xls = pd.ExcelFile(uploaded_file)
     sheets = xls.sheet_names
-    st.sidebar.success(f"File chứa {len(sheets)} sheet")
+    st.sidebar.success(f"📑 File có {len(sheets)} sheet (cán bộ).")
 except Exception as e:
-    st.error(f"Không đọc được file: {e}")
+    st.error(f"❌ Không đọc được file: {e}")
     st.stop()
 
+# ====== ĐỌC DỮ LIỆU ======
 all_dfs = []
 summary_rows = []
 
 for sheet in sheets:
-    try:
-        df = pd.read_excel(uploaded_file, sheet_name=sheet)
-    except Exception as e:
-        st.error(f"Lỗi đọc sheet '{sheet}': {e}")
-        st.stop()
-
+    df = pd.read_excel(uploaded_file, sheet_name=sheet)
     orig_cols = list(df.columns)
     norm_map = {orig: normalize_col(orig) for orig in orig_cols}
 
-    if show_debug:
-        st.sidebar.markdown(f"**Sheet:** {sheet}")
-        st.sidebar.write("Headers (orig):", orig_cols)
-        st.sidebar.write("Headers (normalized):", list(norm_map.values()))
-
-    # tìm các cột cần thiết bằng cách dò substring trên tên đã chuẩn hóa
     required_lookup = {
         "chi tieu": "Chỉ tiêu",
         "trong so": "Trọng số",
@@ -76,76 +62,74 @@ for sheet in sheets:
     for req_norm, canonical in required_lookup.items():
         found = next((orig for orig, n in norm_map.items() if req_norm in n), None)
         if not found:
-            # nếu không tìm thấy, show lỗi kèm thông tin debug
-            raise ValueError(
-                f"❌ Sheet '{sheet}' thiếu cột tương ứng với '{canonical}'.\n"
-                f"Header thực tế: {orig_cols}\n"
-                f"Header đã chuẩn hóa: {list(norm_map.values())}\n"
-                f"Lưu ý: các tên cột hợp lệ ví dụ: 'Chỉ tiêu', 'Trọng số', 'Kế hoạch', 'Thực hiện' (các biến thể như 'Trọng số (%)' sẽ được nhận diện)."
-            )
+            st.error(f"❌ Sheet '{sheet}' thiếu cột '{canonical}'. Header: {orig_cols}")
+            st.stop()
         col_rename[found] = canonical
 
-    # rename sang tên chính thức
     df = df.rename(columns=col_rename)
 
-    # convert numeric columns
+    # Chuẩn hóa dữ liệu số
     df["Trọng số"] = to_num(df["Trọng số"]).fillna(0)
-    # Nếu tổng trọng số lớn hơn 1.1 -> có khả năng nhập dạng 30 (tức 30%) => chia 100
-    if df["Trọng số"].sum() > 1.1:
+    if df["Trọng số"].sum() > 1.1:  # nếu nhập 30 thay vì 0.3
         df["Trọng số"] = df["Trọng số"] / 100.0
 
     df["Kế hoạch"] = to_num(df["Kế hoạch"]).fillna(0)
     df["Thực hiện"] = to_num(df["Thực hiện"]).fillna(0)
 
-    # tránh chia cho 0
-    df["% hoàn thành"] = df.apply(lambda r: (r["Thực hiện"] / r["Kế hoạch"]) if r["Kế hoạch"] not in (0, np.nan) else 0, axis=1)
-    df["% hoàn thành"] = df["% hoàn thành"].replace([np.inf, -np.inf], 0).fillna(0)
+    # % hoàn thành
+    df["%HT"] = df.apply(
+        lambda r: (r["Thực hiện"] / r["Kế hoạch"]) if r["Kế hoạch"] else 0,
+        axis=1
+    )
+    df["%HT"] = df["%HT"].replace([np.inf, -np.inf], 0).fillna(0)
 
-    # tính điểm (nếu column 'Điểm' đã có thì vẫn ghi đè để đảm bảo consistent)
-    df["Điểm"] = df["% hoàn thành"] * df["Trọng số"]
+    # Điểm = min(%HT,1) * Trọng số
+    df["Điểm"] = df.apply(lambda r: min(r["%HT"], 1) * r["Trọng số"], axis=1)
 
-    # lưu tên nhân viên từ sheet
     df["Nhân viên"] = sheet
-
     all_dfs.append(df)
 
-    total_score = df["Điểm"].sum()
-    total_plan = df["Kế hoạch"].sum()
-    total_actual = df["Thực hiện"].sum()
-    overall_pct = (total_actual / total_plan) if total_plan != 0 else 0
-
+    # Tổng hợp cho CB
     summary_rows.append({
         "Nhân viên": sheet,
-        "Điểm KPI": round(total_score, 6),
-        "%HT chung": round(overall_pct * 100, 2),
-        "Kế hoạch tổng": total_plan,
-        "Thực hiện tổng": total_actual
+        "Điểm KPI": round(df["Điểm"].sum(), 4),
+        "%HT chung": round((df["Thực hiện"].sum() / df["Kế hoạch"].sum() * 100) if df["Kế hoạch"].sum() else 0, 2),
+        "Kế hoạch tổng": df["Kế hoạch"].sum(),
+        "Thực hiện tổng": df["Thực hiện"].sum()
     })
 
-# gộp
 full_df = pd.concat(all_dfs, ignore_index=True)
 summary_df = pd.DataFrame(summary_rows).sort_values("Điểm KPI", ascending=False).reset_index(drop=True)
 
-# hiển thị
-st.subheader("📋 Bảng tổng hợp KPI")
+# ====== DASHBOARD ======
+st.subheader("🏆 Bảng xếp hạng KPI")
 st.dataframe(summary_df, use_container_width=True)
 
-st.subheader("🏆 Ranking theo Điểm KPI")
-fig_rank = px.bar(summary_df, x="Nhân viên", y="Điểm KPI", text="Điểm KPI")
-st.plotly_chart(fig_rank, use_container_width=True)
+# Biểu đồ Top 5
+st.subheader("🥇 Top 5 cán bộ")
+fig_top = px.bar(summary_df.head(5), x="Nhân viên", y="Điểm KPI", text="Điểm KPI", color="Nhân viên")
+st.plotly_chart(fig_top, use_container_width=True)
 
+# Biểu đồ Bottom 5
+if len(summary_df) > 5:
+    st.subheader("⚠️ Bottom 5 cán bộ")
+    fig_bottom = px.bar(summary_df.tail(5), x="Nhân viên", y="Điểm KPI", text="Điểm KPI", color="Nhân viên")
+    st.plotly_chart(fig_bottom, use_container_width=True)
+
+# Chi tiết từng CB
 st.subheader("🔎 Phân tích chi tiết")
 sel = st.selectbox("Chọn nhân viên", summary_df["Nhân viên"].tolist())
 if sel:
     dd = full_df[full_df["Nhân viên"] == sel].copy()
-    st.markdown(f"### Chi tiết: **{sel}**")
-    st.dataframe(dd, use_container_width=True)
+    st.markdown(f"### 📌 Chi tiết KPI: **{sel}**")
+    st.dataframe(dd[["Chỉ tiêu","Trọng số","Kế hoạch","Thực hiện","%HT","Điểm"]], use_container_width=True)
 
-    fig_cmp = px.bar(dd, x="Chỉ tiêu", y=["Kế hoạch", "Thực hiện"], barmode="group", text_auto=True,
+    fig_cmp = px.bar(dd, x="Chỉ tiêu", y=["Kế hoạch","Thực hiện"],
+                     barmode="group", text_auto=True,
                      title=f"So sánh Kế hoạch vs Thực hiện - {sel}")
     st.plotly_chart(fig_cmp, use_container_width=True)
 
-# download tổng hợp
+# ====== DOWNLOAD ======
 def to_excel_bytes(df):
     out = BytesIO()
     with pd.ExcelWriter(out, engine="xlsxwriter") as writer:
